@@ -38,9 +38,12 @@ button,input,select{font:inherit;color:inherit}
 #empty{position:absolute;inset:16px;border:1px dashed #b5b5b5;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--sub);text-align:center;line-height:1.6;padding:16px}
 #empty b{color:var(--text);font-size:17px}
 #pauseBadge{position:absolute;top:10px;left:10px;background:rgba(255,255,255,.92);border:1px solid var(--stroke);padding:3px 10px;border-radius:6px;font-size:13px;color:var(--sub);pointer-events:none}
-#busy{position:absolute;inset:0;background:rgba(243,243,243,.85);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--sub);z-index:5}
+#loading{position:fixed;left:50%;top:45%;transform:translate(-50%,-50%);width:min(280px,80vw);background:#fff;border:1px solid var(--stroke);border-radius:12px;box-shadow:0 10px 32px rgba(0,0,0,.2);padding:18px 20px 16px;z-index:40;pointer-events:none;text-align:center}
+#loadingText{font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap}
+#loadingBar{height:5px;border-radius:3px;background:#e3e3e3;margin-top:12px;overflow:hidden}
+#loadingFill{height:100%;width:0;background:var(--accent);transition:width .1s}
 
-#gauge{height:8px;flex:none;background:#d9d9d9;position:relative}
+#gauge{height:24px;flex:none;background:#d9d9d9;position:relative}
 #gaugeFill{position:absolute;left:0;top:0;bottom:0;width:100%;background:var(--accent)}
 #gauge.warn #gaugeFill{background:var(--warn)}
 #gauge.last #gaugeFill{background:var(--danger)}
@@ -137,7 +140,6 @@ body.minimal #toast{bottom:calc(30px + var(--sab))}
       <button class="btn accent" id="btnAddEmpty">画像を追加</button>
     </div>
     <div id="pauseBadge" class="hidden">一時停止</div>
-    <div id="busy" class="hidden"></div>
   </div>
   <div id="gauge"><div id="gaugeFill"></div></div>
   <div id="bar">
@@ -192,6 +194,9 @@ body.minimal #toast{bottom:calc(30px + var(--sab))}
       <div class="row hidden" id="fitRow"><label class="k">収め方</label>
         <div class="v"><div class="seg" id="segFit"><button data-v="contain">全体</button><button data-v="cover">枠を埋める</button></div></div>
       </div>
+      <div class="row"><label class="k">終了音</label>
+        <div class="v"><label class="switch"><input type="checkbox" id="alarm"><span></span></label></div>
+      </div>
     </div>
 
     <div class="card">
@@ -217,6 +222,7 @@ body.minimal #toast{bottom:calc(30px + var(--sab))}
   </div>
 </div>
 <div id="toast"></div>
+<div id="loading" class="hidden"><div id="loadingText"></div><div id="loadingBar"><div id="loadingFill"></div></div></div>
 
 <script>
 "use strict";
@@ -228,7 +234,8 @@ const DEFAULTS = {
   ovOn:false, opacity:80,
   frameOn:true, frameColor:"#00eaff", frameW:4, frameInset:5,
   gridOn:true,  gridColor:"#ff7300",  gridW:2, cols:3, rows:3,
-  diagOn:true,  diagColor:"#ffffa0",  diagW:1
+  diagOn:true,  diagColor:"#ffffa0",  diagW:1,
+  alarm:true
 };
 const SKEY = "filmStudyViewer.settings";
 let S = {...DEFAULTS};
@@ -283,15 +290,21 @@ async function processFile(f){
   return {blob, thumb};
 }
 
+function showProgress(text, ratio){
+  $("loading").classList.remove("hidden");
+  $("loadingText").textContent = text;
+  $("loadingFill").style.width = ((ratio || 0) * 100).toFixed(1) + "%";
+}
+function hideProgress(){ $("loading").classList.add("hidden"); }
+
 async function addFiles(list){
   const files = Array.from(list).filter(f => (f.type || "").startsWith("image/") || /\.(jpe?g|png|gif|webp|bmp|avif|heic|heif)$/i.test(f.name));
   if(!files.length) return;
   const keys = new Set(items.map(i => i.key));
   let added = 0, dup = 0, bad = 0, saveFail = false;
-  const busy = $("busy"); busy.classList.remove("hidden");
   for(let i = 0; i < files.length; i++){
     const f = files[i];
-    busy.textContent = `読み込み中… ${i + 1} / ${files.length}`;
+    showProgress(`${i + 1} / ${files.length} 枚目を読み込み中`, i / files.length);
     const key = f.name + "|" + f.size + "|" + f.lastModified;
     if(keys.has(key)){ dup++; continue; }
     let data;
@@ -303,8 +316,9 @@ async function addFiles(list){
     const it = makeItem(rec);
     items.push(it); byId.set(it.id, it); keys.add(key); added++;
   }
-  busy.classList.add("hidden");
-  let msg = `${added} 枚追加`;
+  showProgress(`${files.length} / ${files.length} 枚目を読み込み中`, 1);
+  hideProgress();
+  let msg = `${added} 枚追加しました`;
   if(dup) msg += `・重複 ${dup} 枚を除外`;
   if(bad) msg += `・読み込めない ${bad} 枚をスキップ`;
   toast(saveFail ? "容量不足などで一部の画像を保存できませんでした" : msg);
@@ -455,6 +469,35 @@ function applyOverlay(){
   drawGrid();
 }
 
+/* ================= 終了音 ================= */
+let actx = null;
+function ensureAudio(){
+  try{
+    if(!actx){
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      // iOS 向け：ユーザー操作中に無音を一度鳴らして音を出せる状態にしておく
+      const buf = actx.createBuffer(1, 1, 22050), src = actx.createBufferSource();
+      src.buffer = buf; src.connect(actx.destination); src.start(0);
+    }
+    if(actx.state !== "running") actx.resume();
+  }catch(e){ actx = null; }
+  return actx;
+}
+// 鈴のような短い音を1回
+function chime(){
+  const ctx = ensureAudio(); if(!ctx) return;
+  const t = ctx.currentTime + 0.02;
+  const out = ctx.createGain(); out.gain.value = 0.35; out.connect(ctx.destination);
+  [[1046.5, 1, 1.1], [2093, 0.4, 0.6], [3150, 0.15, 0.35]].forEach(([f, a, d]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(a, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05);
+  });
+}
+
 /* ================= タイマー ================= */
 let state = "stopped", remaining = 0, lastTs = 0;   // stopped | playing | paused
 const dur = () => Math.max(1, +S.seconds || 60) * 1000;
@@ -463,6 +506,7 @@ function play(){
   if(!items.length){ toast("先に画像を追加してください"); return; }
   if(curId == null){ pos = 0; show(seq[0]); }
   if(state === "stopped") remaining = dur();
+  if(S.alarm) ensureAudio();      // 音はタップのタイミングで準備しておく
   state = "playing"; lastTs = performance.now();
   requestAnimationFrame(tick); updateUI();
 }
@@ -473,7 +517,7 @@ function resetTimer(){ remaining = dur(); lastTs = performance.now(); drawGauge(
 function tick(ts){
   if(state !== "playing") return;
   remaining -= Math.min(ts - lastTs, 1000); lastTs = ts;
-  if(remaining <= 0){ step(1); remaining = dur(); }
+  if(remaining <= 0){ if(S.alarm) chime(); step(1); remaining = dur(); }
   drawGauge();
   requestAnimationFrame(tick);
 }
@@ -611,6 +655,7 @@ function syncControls(){
   $("fitRow").classList.toggle("hidden", S.aspect === "image");
   $("opacity").value = S.opacity; $("opacityVal").textContent = S.opacity + "%";
   syncLines();
+  $("alarm").checked = S.alarm;
 }
 bindSeg("segOrder", "order", () => { rebuildSeq(); updateSub(); });
 bindSeg("segFit", "fit", layout);
@@ -623,6 +668,7 @@ $("seconds").onchange = e => {
 $("aspect").onchange = e => { S.aspect = e.target.value; syncControls(); save(); layout(); };
 $("customW").onchange = e => { S.customW = clampNum(e.target, 0.1, 100, 1); save(); layout(); };
 $("customH").onchange = e => { S.customH = clampNum(e.target, 0.1, 100, 1); save(); layout(); };
+$("alarm").onchange = e => { S.alarm = e.target.checked; save(); if(S.alarm) chime(); };
 $("ovOn").onchange = e => { S.ovOn = e.target.checked; applyOverlay(); save(); };
 $("opacity").oninput = e => { S.opacity = +e.target.value; $("opacityVal").textContent = S.opacity + "%"; $("overlay").style.opacity = S.opacity / 100; save(); };
 $("frameInset").onchange = e => { S.frameInset = clampNum(e.target, 0, 40, 5); drawGrid(); save(); };
@@ -663,6 +709,5 @@ function toast(msg){
   if("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
 </script>
-<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "991d75fb98894c599ec91ff6296ff0bf"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>

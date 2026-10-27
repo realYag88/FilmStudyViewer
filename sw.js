@@ -1,6 +1,6 @@
 // オフラインでも開けるようにアプリ本体をキャッシュする。
 // 更新を配るときは VERSION を上げる。
-const VERSION = "fsv-v1";
+const VERSION = "fsv-v2";
 const ASSETS = [
   "./",
   "./index.html",
