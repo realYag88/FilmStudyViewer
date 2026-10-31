@@ -483,16 +483,18 @@ function ensureAudio(){
   }catch(e){ actx = null; }
   return actx;
 }
-// 鈴のような短い音を1回
+// 落ち着いた「ポーン」という音を1回（低めの音にやわらかい倍音を少しだけ）
 function chime(){
   const ctx = ensureAudio(); if(!ctx) return;
   const t = ctx.currentTime + 0.02;
-  const out = ctx.createGain(); out.gain.value = 0.35; out.connect(ctx.destination);
-  [[1046.5, 1, 1.1], [2093, 0.4, 0.6], [3150, 0.15, 0.35]].forEach(([f, a, d]) => {
+  const out = ctx.createGain(); out.gain.value = 0.32;
+  const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 1800;
+  out.connect(lp).connect(ctx.destination);
+  [[523.25, 1, 1.6], [1046.5, 0.18, 0.7], [1569.8, 0.05, 0.35]].forEach(([f, a, d]) => {
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = "sine"; o.frequency.value = f;
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(a, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(a, t + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, t + d);
     o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05);
   });
@@ -709,5 +711,6 @@ function toast(msg){
   if("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 })();
 </script>
+<!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "991d75fb98894c599ec91ff6296ff0bf"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>
