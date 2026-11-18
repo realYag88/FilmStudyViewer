@@ -202,7 +202,7 @@ body.minimal #toast{bottom:calc(30px + var(--sab))}
         <div class="v"><div class="seg" id="segOrder"><button data-v="seq">順番</button><button data-v="random">ランダム</button></div></div>
       </div>
       <div class="row"><label class="k">時間</label>
-        <div class="v"><input type="number" id="seconds" min="1" max="7200" inputmode="numeric"><span class="unit">秒</span></div>
+        <div class="v"><input type="number" id="minutes" min="0" max="120" step="1" inputmode="numeric"><span class="unit">分</span><input type="number" id="secs" min="0" max="59" step="1" inputmode="numeric"><span class="unit">秒</span></div>
       </div>
       <div class="row"><label class="k">比率</label>
         <div class="v"><select id="aspect">
@@ -697,7 +697,7 @@ function syncLines(){
 }
 function syncControls(){
   setSeg("segOrder", S.order); setSeg("segFit", S.fit);
-  $("seconds").value = S.seconds;
+  setTimeInputs();
   $("aspect").value = S.aspect; $("customW").value = S.customW; $("customH").value = S.customH;
   $("customRow").classList.toggle("hidden", S.aspect !== "custom");
   $("fitRow").classList.toggle("hidden", S.aspect === "image");
@@ -715,11 +715,23 @@ function applyTheme(){
 bindSeg("segOrder", "order", () => { rebuildSeq(); updateSub(); });
 bindSeg("segFit", "fit", layout);
 const clampNum = (el, min, max, def) => { let v = +el.value; if(!isFinite(v) || el.value === "") v = def; v = Math.max(min, Math.min(max, v)); el.value = v; return v; };
-$("seconds").onchange = e => {
-  S.seconds = Math.round(clampNum(e.target, 1, 7200, 60)); e.target.value = S.seconds; save();
+// 時間は「分」と「秒」の2欄で入力し、中では合計の秒数で持つ
+function setTimeInputs(){
+  $("minutes").value = Math.floor(S.seconds / 60);
+  $("secs").value = S.seconds % 60;
+}
+function timeChanged(){
+  let m = Math.floor(+$("minutes").value || 0), sec = Math.floor(+$("secs").value || 0);
+  if(m < 0) m = 0; if(sec < 0) sec = 0;
+  let v = m * 60 + sec;                 // 「90秒」と入れた場合も 1分30秒 に直す
+  if(v < 1) v = 1; if(v > 7200) v = 7200;
+  S.seconds = v; setTimeInputs(); save();
   if(state === "stopped" || remaining > dur()) remaining = dur();
-  updateSub(); drawGauge();
-};
+  if(typeof updateSub === "function") updateSub();
+  drawGauge();
+}
+$("minutes").onchange = timeChanged;
+$("secs").onchange = timeChanged;
 $("aspect").onchange = e => { S.aspect = e.target.value; syncControls(); save(); layout(); };
 $("customW").onchange = e => { S.customW = clampNum(e.target, 0.1, 100, 1); save(); layout(); };
 $("customH").onchange = e => { S.customH = clampNum(e.target, 0.1, 100, 1); save(); layout(); };
